@@ -1,0 +1,6 @@
+transformers
+torch
+google-generativeai
+pytest
+python-dotenv
+accelerate
