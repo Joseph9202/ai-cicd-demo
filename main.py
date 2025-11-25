@@ -262,7 +262,11 @@ def get_predictions():
         portfolio_stats = calculate_portfolio_performance(predictions)
         
         # Check for alerts
-        check_and_alert(portfolio_stats, signal, current_price)
+        if predictions:
+            latest = predictions[0]
+            signal = latest['signal']
+            current_price = latest['price']
+            check_and_alert(portfolio_stats, signal, current_price)
         
         return jsonify({
             'status': 'success',
