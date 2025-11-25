@@ -197,7 +197,7 @@
             <p>Predicción de volatilidad automatizada con ML | <span class="badge">DEMO EDUCATIVO</span></p>
         </div>
 
-        <div class="stats-grid">
+        <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
             <div class="stat-card">
                 <div class="stat-label">Precio BTC</div>
                 <div id="price-value" class="stat-value">Cargando...</div>
@@ -213,6 +213,12 @@
             <div class="stat-card">
                 <div class="stat-label">Modelo</div>
                 <div id="model-value" class="stat-value small">GARCH</div>
+            </div>
+            <div class="stat-card"
+                style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #10b981;">
+                <div class="stat-label" style="color: #10b981;">Portafolio $1000</div>
+                <div id="portfolio-value" class="stat-value small" style="color: #10b981;">$1000</div>
+                <div id="portfolio-return" class="stat-label" style="margin-top: 5px; font-size: 10px;">+0%</div>
             </div>
         </div>
 
@@ -238,6 +244,7 @@
 
                 if (data.status === 'success') {
                     updateStats(data.predictions[0]);
+                    updatePortfolio(data.portfolio);
                     updateChart(data.predictions.reverse());
                     updateTable(data.predictions.slice(-10).reverse());
                 }
@@ -256,6 +263,25 @@
             if (prediction.params && prediction.params.p && prediction.params.q) {
                 document.getElementById('model-value').textContent = `GARCH(${prediction.params.p},${prediction.params.q})`;
             }
+        }
+
+        function updatePortfolio(portfolio) {
+            if (!portfolio) return;
+
+            const value = portfolio.current;
+            const returnPct = portfolio.return_pct;
+            const vsHodl = portfolio.vs_hodl;
+
+            document.getElementById('portfolio-value').textContent = `$${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+
+            const returnColor = returnPct >= 0 ? '#10b981' : '#ef4444';
+            const returnSign = returnPct >= 0 ? '+' : '';
+            const vsHodlSign = vsHodl >= 0 ? '+' : '';
+
+            document.getElementById('portfolio-return').innerHTML = `
+                <span style="color: ${returnColor}">${returnSign}${returnPct}%</span> 
+                <span style="color: #8a92a6">| vs HODL: ${vsHodlSign}${vsHodl}%</span>
+            `;
         }
 
         function updateChart(predictions) {

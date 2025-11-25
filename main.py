@@ -70,6 +70,79 @@ def optimize_garch_params(returns, max_p=3, max_q=3):
     
     return best_params
 
+def calculate_portfolio_performance(predictions):
+    """
+    Simulate a $1000 portfolio following GARCH signals
+    
+    DISCLAIMER: PURELY EDUCATIONAL SIMULATION - NOT FINANCIAL ADVICE
+    
+    Args:
+        predictions: List of prediction dicts with price, signal, timestamp
+    
+    Returns:
+        dict: Portfolio statistics
+    """
+    if not predictions or len(predictions) < 2:
+        return {
+            "initial": 1000,
+            "current": 1000,
+            "return_pct": 0,
+            "vs_hodl": 0,
+            "trades": 0
+        }
+    
+    # Sort by timestamp
+    predictions = sorted(predictions, key=lambda x: x['timestamp'])
+    
+    # Initialize
+    initial_capital = 1000
+    cash = 0
+    btc_holdings = 0
+    last_signal = None
+    trades = 0
+    
+    # Start with first prediction - assume BUY to compare fairly
+    first_price = predictions[0]['price']
+    btc_holdings = initial_capital / first_price
+    cash = 0
+    
+    # Simulate trades based on signals
+    for pred in predictions[1:]:
+        current_price = pred['price']
+        signal = pred['signal']
+        
+        # Execute trade if signal changed
+        if signal != last_signal:
+            if signal == 'SELL' and btc_holdings > 0:
+                # Sell BTC to USD
+                cash = btc_holdings * current_price
+                btc_holdings = 0
+                trades += 1
+            elif signal == 'BUY' and cash > 0:
+                # Buy BTC with USD
+                btc_holdings = cash / current_price
+                cash = 0
+                trades += 1
+        
+        last_signal = signal
+    
+    # Calculate current portfolio value
+    last_price = predictions[-1]['price']
+    current_value = cash + (btc_holdings * last_price)
+    
+    # Calculate buy & hold for comparison
+    hodl_btc = initial_capital / first_price
+    hodl_value = hodl_btc * last_price
+    
+    return {
+        "initial": initial_capital,
+        "current": round(current_value, 2),
+        "return_pct": round(((current_value - initial_capital) / initial_capital) * 100, 2),
+        "vs_hodl": round(((current_value - hodl_value) / hodl_value) * 100, 2),
+        "hodl_value": round(hodl_value, 2),
+        "trades": trades
+    }
+
 @app.route('/')
 def dashboard():
     """Serve the dashboard HTML"""
@@ -106,10 +179,14 @@ def get_predictions():
                 'params': row.model_params if row.model_params else {}
             })
         
+        # Calculate portfolio performance
+        portfolio_stats = calculate_portfolio_performance(predictions)
+        
         return jsonify({
             'status': 'success',
             'count': len(predictions),
-            'predictions': predictions
+            'predictions': predictions,
+            'portfolio': portfolio_stats
         })
     except Exception as e:
         return jsonify({
