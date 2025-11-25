@@ -4,8 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GARCH Trading Bot Dashboard</title>
+    <title>GARCH Trading Bot</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -14,111 +15,125 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #0a0e27;
+            color: #e0e6ed;
             min-height: 100vh;
-            padding: 20px;
+            padding: 15px;
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 1200px;
             margin: 0 auto;
         }
 
         .header {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 30px;
-            border-radius: 15px;
-            margin-bottom: 20px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
+            padding: 20px 30px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 15px rgba(0, 119, 181, 0.3);
         }
 
         .header h1 {
-            color: #667eea;
-            margin-bottom: 10px;
+            color: white;
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 5px;
         }
 
         .header p {
-            color: #666;
-            font-size: 14px;
+            color: rgba(255, 255, 255, 0.85);
+            font-size: 13px;
         }
 
-        .disclaimer {
-            background: #fff3cd;
-            border-left: 4px solid #ffc107;
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 5px;
-        }
-
-        .grid {
+        .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-
-        .card {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 25px;
-            border-radius: 15px;
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
-        }
-
-        .card h2 {
-            color: #667eea;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
             margin-bottom: 15px;
-            font-size: 18px;
         }
 
-        .metric {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 0;
-            border-bottom: 1px solid #eee;
+        .stat-card {
+            background: linear-gradient(135deg, #1a1f3a 0%, #141829 100%);
+            padding: 18px;
+            border-radius: 10px;
+            border: 1px solid #2d3548;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
         }
 
-        .metric:last-child {
-            border-bottom: none;
+        .stat-label {
+            color: #8a92a6;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            font-weight: 600;
         }
 
-        .metric-label {
-            color: #666;
-            font-size: 14px;
+        .stat-value {
+            color: #ffffff;
+            font-size: 26px;
+            font-weight: 700;
+            line-height: 1;
         }
 
-        .metric-value {
-            font-size: 24px;
-            font-weight: bold;
-            color: #333;
+        .stat-value.small {
+            font-size: 22px;
         }
 
         .signal {
             display: inline-block;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-weight: bold;
+            padding: 6px 16px;
+            border-radius: 6px;
+            font-weight: 700;
             font-size: 14px;
+            letter-spacing: 0.5px;
         }
 
         .signal.BUY {
-            background: #4caf50;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
             color: white;
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
         }
 
         .signal.SELL {
-            background: #f44336;
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
             color: white;
+            box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
         }
 
         .signal.HOLD {
-            background: #ff9800;
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
             color: white;
+            box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
         }
 
-        .chart-container {
-            grid-column: 1 / -1;
+        .chart-card {
+            background: linear-gradient(135deg, #1a1f3a 0%, #141829 100%);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #2d3548;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .chart-card h2 {
+            color: #ffffff;
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+
+        .chart-card h2::before {
+            content: "";
+            width: 4px;
+            height: 18px;
+            background: linear-gradient(180deg, #0077b5 0%, #005885 100%);
+            margin-right: 10px;
+            border-radius: 2px;
         }
 
         table {
@@ -128,26 +143,49 @@
 
         th,
         td {
-            padding: 12px;
+            padding: 10px 12px;
             text-align: left;
-            border-bottom: 1px solid #eee;
+            font-size: 13px;
         }
 
         th {
-            background: #f8f9fa;
-            color: #667eea;
-            font-weight: 600;
+            background: #0d1120;
+            color: #0077b5;
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+            border-bottom: 2px solid #0077b5;
+        }
+
+        td {
+            border-bottom: 1px solid #2d3548;
+            color: #e0e6ed;
+        }
+
+        tr:hover td {
+            background: rgba(0, 119, 181, 0.05);
+        }
+
+        .timestamp {
+            color: #8a92a6;
+            font-size: 11px;
         }
 
         .loading {
             text-align: center;
-            padding: 40px;
-            color: #666;
+            padding: 30px;
+            color: #8a92a6;
+            font-size: 14px;
         }
 
-        .timestamp {
-            color: #999;
-            font-size: 12px;
+        .badge {
+            background: rgba(0, 119, 181, 0.2);
+            color: #0077b5;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
         }
     </style>
 </head>
@@ -155,30 +193,37 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>📈 GARCH Trading Bot Dashboard</h1>
-            <p>Volatilidad en tiempo real usando modelos GARCH(1,1)</p>
+            <h1>📊 GARCH Trading Bot</h1>
+            <p>Predicción de volatilidad automatizada con ML | <span class="badge">DEMO EDUCATIVO</span></p>
         </div>
 
-        <div class="disclaimer">
-            <strong>⚠️ Proyecto Educativo:</strong> Este dashboard es solo para demostración de pipelines CI/CD. No usar
-            para trading real.
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Precio BTC</div>
+                <div id="price-value" class="stat-value">Cargando...</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Volatilidad</div>
+                <div id="volatility-value" class="stat-value small">Cargando...</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Señal</div>
+                <div id="signal-value" class="stat-value small">...</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Modelo</div>
+                <div id="model-value" class="stat-value small">GARCH</div>
+            </div>
         </div>
 
-        <div class="grid">
-            <div class="card">
-                <h2>Última Predicción</h2>
-                <div id="latest-prediction" class="loading">Cargando...</div>
-            </div>
+        <div class="chart-card">
+            <h2>Precio y Volatilidad - Últimas 48h</h2>
+            <canvas id="priceChart" height="80"></canvas>
+        </div>
 
-            <div class="card chart-container">
-                <h2>Historial de Precios y Volatilidad</h2>
-                <canvas id="priceChart"></canvas>
-            </div>
-
-            <div class="card chart-container">
-                <h2>Predicciones Recientes</h2>
-                <div id="predictions-table" class="loading">Cargando...</div>
-            </div>
+        <div class="chart-card">
+            <h2>Predicciones Recientes</h2>
+            <div id="predictions-table" class="loading">Cargando datos...</div>
         </div>
     </div>
 
@@ -187,61 +232,44 @@
 
         async function fetchPredictions() {
             try {
-                // Use full absolute path for Cloud Functions
                 const apiUrl = 'https://us-east1-travel-recomender.cloudfunctions.net/garch-trading-bot/api/predictions';
                 const response = await fetch(apiUrl);
                 const data = await response.json();
 
                 if (data.status === 'success') {
-                    updateLatestPrediction(data.predictions[0]);
+                    updateStats(data.predictions[0]);
                     updateChart(data.predictions.reverse());
-                    updateTable(data.predictions.slice(-20).reverse());
+                    updateTable(data.predictions.slice(-10).reverse());
                 }
             } catch (error) {
                 console.error('Error fetching predictions:', error);
             }
         }
 
-        function updateLatestPrediction(prediction) {
+        function updateStats(prediction) {
             if (!prediction) return;
 
-            const html = `
-                <div class="metric">
-                    <span class="metric-label">Precio BTC</span>
-                    <span class="metric-value">$${prediction.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Volatilidad Predicha</span>
-                    <span class="metric-value">${prediction.volatility.toFixed(3)}%</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Señal</span>
-                    <span class="signal ${prediction.signal}">${prediction.signal}</span>
-                </div>
-                <div class="metric">
-                    <span class="timestamp">Actualizado: ${new Date(prediction.timestamp).toLocaleString('es-ES')}</span>
-                </div>
-            `;
+            document.getElementById('price-value').textContent = `$${prediction.price.toLocaleString('en-US', { minimumFractionDigits: 0 })}`;
+            document.getElementById('volatility-value').textContent = `${prediction.volatility.toFixed(2)}%`;
+            document.getElementById('signal-value').innerHTML = `<span class="signal ${prediction.signal}">${prediction.signal}</span>`;
 
-            document.getElementById('latest-prediction').innerHTML = html;
+            if (prediction.params && prediction.params.p && prediction.params.q) {
+                document.getElementById('model-value').textContent = `GARCH(${prediction.params.p},${prediction.params.q})`;
+            }
         }
 
         function updateChart(predictions) {
             const ctx = document.getElementById('priceChart').getContext('2d');
 
-            const labels = predictions.map(p => new Date(p.timestamp).toLocaleTimeString('es-ES', {
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            }));
+            const labels = predictions.map(p => {
+                const d = new Date(p.timestamp);
+                return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+            });
 
             const prices = predictions.map(p => p.price);
             const volatilities = predictions.map(p => p.volatility);
 
-            if (priceChart) {
-                priceChart.destroy();
-            }
+            if (priceChart) priceChart.destroy();
 
             priceChart = new Chart(ctx, {
                 type: 'line',
@@ -251,49 +279,53 @@
                         {
                             label: 'Precio BTC',
                             data: prices,
-                            borderColor: '#667eea',
-                            backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                            borderColor: '#0077b5',
+                            backgroundColor: 'rgba(0, 119, 181, 0.1)',
+                            borderWidth: 2,
                             yAxisID: 'y',
-                            tension: 0.4
+                            tension: 0.4,
+                            pointRadius: 0,
+                            pointHoverRadius: 5
                         },
                         {
                             label: 'Volatilidad (%)',
                             data: volatilities,
-                            borderColor: '#f44336',
-                            backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            borderWidth: 2,
                             yAxisID: 'y1',
-                            tension: 0.4
+                            tension: 0.4,
+                            pointRadius: 0,
+                            pointHoverRadius: 5
                         }
                     ]
                 },
                 options: {
                     responsive: true,
-                    interaction: {
-                        mode: 'index',
-                        intersect: false,
+                    maintainAspectRatio: true,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: {
+                            labels: { color: '#e0e6ed', font: { size: 11, family: 'Inter' } }
+                        }
                     },
                     scales: {
+                        x: {
+                            ticks: { color: '#8a92a6', font: { size: 10 } },
+                            grid: { color: '#2d3548', drawBorder: false }
+                        },
                         y: {
                             type: 'linear',
-                            display: true,
                             position: 'left',
-                            title: {
-                                display: true,
-                                text: 'Precio (USD)'
-                            }
+                            ticks: { color: '#0077b5', font: { size: 11 } },
+                            grid: { color: '#2d3548', drawBorder: false }
                         },
                         y1: {
                             type: 'linear',
-                            display: true,
                             position: 'right',
-                            title: {
-                                display: true,
-                                text: 'Volatilidad (%)'
-                            },
-                            grid: {
-                                drawOnChartArea: false,
-                            },
-                        },
+                            ticks: { color: '#10b981', font: { size: 11 } },
+                            grid: { drawOnChartArea: false, drawBorder: false }
+                        }
                     }
                 }
             });
@@ -304,18 +336,20 @@
                 <table>
                     <thead>
                         <tr>
-                            <th>Fecha/Hora</th>
+                            <th>Hora</th>
                             <th>Precio</th>
                             <th>Volatilidad</th>
+                            <th>Modelo</th>
                             <th>Señal</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${predictions.map(p => `
                             <tr>
-                                <td class="timestamp">${new Date(p.timestamp).toLocaleString('es-ES')}</td>
-                                <td>$${p.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                                <td>${p.volatility.toFixed(3)}%</td>
+                                <td class="timestamp">${new Date(p.timestamp).toLocaleTimeString('es-ES')}</td>
+                                <td>$${p.price.toLocaleString('en-US', { minimumFractionDigits: 0 })}</td>
+                                <td>${p.volatility.toFixed(2)}%</td>
+                                <td>${p.params && p.params.p ? `GARCH(${p.params.p},${p.params.q})` : 'GARCH(1,1)'}</td>
                                 <td><span class="signal ${p.signal}">${p.signal}</span></td>
                             </tr>
                         `).join('')}
@@ -326,10 +360,7 @@
             document.getElementById('predictions-table').innerHTML = html;
         }
 
-        // Initial load
         fetchPredictions();
-
-        // Auto-refresh every minute
         setInterval(fetchPredictions, 60000);
     </script>
 </body>
