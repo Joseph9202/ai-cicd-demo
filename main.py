@@ -27,15 +27,69 @@ import pandas as pd
 import numpy as np
 from arch import arch_model
 from google.cloud import bigquery
+from flask import Flask, render_template, jsonify
+import functions_framework
 
-def garch_trading_bot(request):
-    """Cloud Function to run GARCH volatility prediction every 5 minutes"""
+# Create Flask app
+app = Flask(__name__)
+
+# Configuration
+PROJECT_ID = "travel-recomender"
+DATASET_ID = "trading_bot"
+TABLE_ID = "garch_predictions"
+
+@app.route('/')
+def dashboard():
+    """Serve the dashboard HTML"""
+    return render_template('dashboard.html')
+
+@app.route('/api/predictions')
+def get_predictions():
+    """API endpoint to fetch predictions from BigQuery"""
+    try:
+        client = bigquery.Client(project=PROJECT_ID)
+        query = f"""
+        SELECT 
+            timestamp,
+            asset,
+            current_price,
+            predicted_volatility,
+            signal,
+            model_params
+        FROM `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}`
+        ORDER BY timestamp DESC
+        LIMIT 100
+        """
+        
+        results = client.query(query).result()
+        predictions = []
+        
+        for row in results:
+            predictions.append({
+                'timestamp': row.timestamp.isoformat(),
+                'asset': row.asset,
+                'price': float(row.current_price),
+                'volatility': float(row.predicted_volatility),
+                'signal': row.signal,
+                'params': row.model_params if row.model_params else {}
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'count': len(predictions),
+            'predictions': predictions
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/run', methods=['POST', 'GET'])
+def run_garch():
+    """Run GARCH prediction - called by Cloud Scheduler"""
     
-    # Configuration
     ASSET = "BTC-USD"
-    PROJECT_ID = "travel-recomender"
-    DATASET_ID = "trading_bot"
-    TABLE_ID = "garch_predictions"
     
     try:
         # 1. Fetch recent price data (last 30 days for sufficient history)
@@ -65,10 +119,8 @@ def garch_trading_bot(request):
         predicted_volatility = float(np.sqrt(forecast.variance.values[-1, 0]))
         
         # 5. Generate trading signal based on volatility
-        # High volatility = opportunity (but risky)
-        # We'll use a simple threshold approach
-        volatility_threshold_high = 3.0  # Above this = SELL (too risky)
-        volatility_threshold_low = 1.5   # Below this = BUY (stable)
+        volatility_threshold_high = 3.0
+        volatility_threshold_low = 1.5
         
         if predicted_volatility > volatility_threshold_high:
             signal = "SELL"
@@ -113,9 +165,16 @@ def garch_trading_bot(request):
         }
         
         print(f"Success: {response}")
-        return (response, 200)
+        return jsonify(response)
         
     except Exception as e:
         error_msg = f"Error: {str(e)}"
         print(error_msg)
-        return ({"status": "error", "message": error_msg}, 500)
+        return jsonify({"status": "error", "message": error_msg}), 500
+
+
+@functions_framework.http
+def garch_trading_bot(request):
+    """Main Cloud Function entry point - routes to Flask app"""
+    with app.request_context(request.environ):
+        return app.full_dispatch_request()
