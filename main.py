@@ -30,6 +30,7 @@ from google.cloud import bigquery
 from flask import Flask, render_template, jsonify
 import functions_framework
 import requests
+import google.generativeai as genai
 
 # Create Flask app
 app = Flask(__name__)
@@ -148,6 +149,112 @@ def check_and_alert(portfolio_stats, signal, current_price):
         print(f"Sending alerts for profit: {portfolio_stats['return_pct']}%")
         send_telegram_alert(msg)
         send_whatsapp_alert(msg)
+
+def generate_ai_report():
+    """
+    Generate AI-powered economic analysis report using Gemini
+    Returns formatted report text
+    """
+    try:
+        # Configure Gemini API
+        api_key = os.environ.get('GEMINI_API_KEY')
+        if not api_key:
+            return "⚠️ GEMINI_API_KEY not configured"
+        
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # Fetch last 24 hours of data
+        client = bigquery.Client(project=PROJECT_ID)
+        query = f"""
+        SELECT 
+            timestamp,
+            current_price,
+            predicted_volatility,
+            signal,
+            model_params
+        FROM `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}`
+        WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+        ORDER BY timestamp DESC
+        """
+        
+        results = client.query(query).result()
+        predictions = []
+        
+        for row in results:
+            params = json.loads(row.model_params) if row.model_params else {}
+            predictions.append({
+                'timestamp': row.timestamp.isoformat(),
+                'price': float(row.current_price),
+                'volatility': float(row.predicted_volatility),
+                'signal': row.signal,
+                'alpha': params.get('alpha', 0),
+                'beta': params.get('beta', 0)
+            })
+        
+        if not predictions:
+            return "📊 No hay datos suficientes para generar reporte (últimas 24h)"
+        
+        # Calculate statistics
+        prices = [p['price'] for p in predictions]
+        vols = [p['volatility'] for p in predictions]
+        signals = [p['signal'] for p in predictions]
+        
+        price_change = ((prices[0] - prices[-1]) / prices[-1]) * 100
+        avg_vol = np.mean(vols)
+        vol_std = np.std(vols)
+        persistence = np.mean([p['alpha'] + p['beta'] for p in predictions if p['alpha'] > 0])
+        
+        buy_pct = (signals.count('BUY') / len(signals)) * 100
+        
+        # Create prompt for Gemini
+        prompt = f"""Eres un analista económico experto en modelos GARCH y volatilidad financiera.
+
+Analiza los siguientes datos de BTC de las últimas 24 horas:
+
+**Datos del Mercado:**
+- Precio actual: ${prices[0]:,.2f}
+- Cambio 24h: {price_change:+.2f}%
+- Número de observaciones: {len(predictions)}
+
+**Análisis de Volatilidad GARCH:**
+- Volatilidad promedio predicha: {avg_vol:.4f}%
+- Desviación estándar: {vol_std:.4f}%
+- Persistencia (α+β): {persistence:.4f}
+- Rango: {min(vols):.4f}% - {max(vols):.4f}%
+
+**Señales de Trading:**
+- BUY: {buy_pct:.1f}%
+- SELL: {100-buy_pct:.1f}%
+
+Genera un reporte conciso (máximo 200 palabras) que incluya:
+1. **Resumen ejecutivo** del comportamiento del activo
+2. **Interpretación económica** de la persistencia de volatilidad
+3. **Evaluación de riesgos** basada en las métricas GARCH
+4. **Outlook** para las próximas horas
+
+Usa emojis apropiados y formato claro para Telegram."""
+
+        # Generate AI response
+        response = model.generate_content(prompt)
+        ai_analysis = response.text
+        
+        # Format final report
+        report = f"""📊 *REPORTE HORARIO - GARCH Trading Bot*
+⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC
+
+{ai_analysis}
+
+---
+_Análisis generado por Gemini AI • Datos: últimas 24h_
+"""
+        
+        return report
+        
+    except Exception as e:
+        error_msg = f"❌ Error generando reporte AI: {str(e)}"
+        print(error_msg)
+        return error_msg
 
 def calculate_portfolio_performance(predictions):
     """
@@ -369,6 +476,29 @@ def run_garch():
         
     except Exception as e:
         error_msg = f"Error: {str(e)}"
+        print(error_msg)
+        return jsonify({"status": "error", "message": error_msg}), 500
+
+@app.route('/report', methods=['POST', 'GET'])
+def send_ai_report():
+    """Generate and send AI-powered economic analysis report via Telegram"""
+    try:
+        print("Generating AI report...")
+        
+        # Generate report using Gemini AI
+        report_text = generate_ai_report()
+        
+        # Send via Telegram
+        send_telegram_alert(report_text)
+        
+        return jsonify({
+            "status": "success",
+            "message": "AI report sent to Telegram",
+            "report_length": len(report_text)
+        })
+        
+    except Exception as e:
+        error_msg = f"Error generating/sending report: {str(e)}"
         print(error_msg)
         return jsonify({"status": "error", "message": error_msg}), 500
 
