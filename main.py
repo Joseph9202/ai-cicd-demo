@@ -29,6 +29,7 @@ from arch import arch_model
 from google.cloud import bigquery
 from flask import Flask, render_template, jsonify
 import functions_framework
+import requests
 
 # Create Flask app
 app = Flask(__name__)
@@ -69,6 +70,84 @@ def optimize_garch_params(returns, max_p=3, max_q=3):
                 continue
     
     return best_params
+
+def send_telegram_alert(message):
+    """Send alert via Telegram Bot API"""
+    token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+    
+    if not token or not chat_id:
+        print("Telegram credentials not configured")
+        return
+        
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "Markdown"
+        }
+        requests.post(url, json=payload, timeout=10)
+        print("Telegram alert sent")
+    except Exception as e:
+        print(f"Failed to send Telegram alert: {e}")
+
+def send_whatsapp_alert(message):
+    """Send alert via Evolution API (WhatsApp)"""
+    api_url = os.environ.get('EVOLUTION_API_URL')
+    api_key = os.environ.get('EVOLUTION_API_KEY')
+    instance = os.environ.get('EVOLUTION_INSTANCE')
+    number = os.environ.get('WHATSAPP_NUMBER')
+    
+    if not api_url or not api_key or not instance or not number:
+        print("Evolution API credentials not configured")
+        return
+        
+    try:
+        # Evolution API endpoint for sending text
+        url = f"{api_url}/message/sendText/{instance}"
+        
+        payload = {
+            "number": number,
+            "options": {
+                "delay": 1200,
+                "presence": "composing",
+                "linkPreview": False
+            },
+            "textMessage": {
+                "text": message
+            }
+        }
+        
+        headers = {
+            "apikey": api_key,
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        print(f"WhatsApp alert sent: {response.status_code}")
+    except Exception as e:
+        print(f"Failed to send WhatsApp alert: {e}")
+
+def check_and_alert(portfolio_stats, signal, current_price):
+    """Check conditions and send alerts if profitable"""
+    # Alert if return is positive OR if there's a new signal
+    # For demo purposes, we'll alert on every run if there's a profit > 0.5%
+    # In production you'd want to limit frequency
+    
+    if portfolio_stats['return_pct'] > 0.5:
+        emoji = "🚀" if portfolio_stats['return_pct'] > 5 else "📈"
+        
+        msg = f"{emoji} *GARCH Bot - REPORTE DE GANANCIAS*\n\n"
+        msg += f"💰 *Portafolio:* ${portfolio_stats['current']}\n"
+        msg += f"📊 *Retorno:* +{portfolio_stats['return_pct']}%\n"
+        msg += f"🆚 *vs HODL:* {portfolio_stats['vs_hodl']}%\n\n"
+        msg += f"🏷️ *Señal Actual:* {signal}\n"
+        msg += f"💲 *Precio BTC:* ${current_price:,.2f}"
+        
+        print(f"Sending alerts for profit: {portfolio_stats['return_pct']}%")
+        send_telegram_alert(msg)
+        send_whatsapp_alert(msg)
 
 def calculate_portfolio_performance(predictions):
     """
@@ -181,6 +260,9 @@ def get_predictions():
         
         # Calculate portfolio performance
         portfolio_stats = calculate_portfolio_performance(predictions)
+        
+        # Check for alerts
+        check_and_alert(portfolio_stats, signal, current_price)
         
         return jsonify({
             'status': 'success',
