@@ -187,7 +187,9 @@
 
         async function fetchPredictions() {
             try {
-                const response = await fetch(window.location.origin + '/api/predictions');
+                // Use full absolute path for Cloud Functions
+                const apiUrl = 'https://us-east1-travel-recomender.cloudfunctions.net/garch-trading-bot/api/predictions';
+                const response = await fetch(apiUrl);
                 const data = await response.json();
 
                 if (data.status === 'success') {
