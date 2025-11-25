@@ -38,6 +38,38 @@ PROJECT_ID = "travel-recomender"
 DATASET_ID = "trading_bot"
 TABLE_ID = "garch_predictions"
 
+def optimize_garch_params(returns, max_p=3, max_q=3):
+    """
+    Grid search to find optimal GARCH(p,q) parameters using AIC criterion
+    
+    Args:
+        returns: Time series of returns
+        max_p: Maximum p value to test
+        max_q: Maximum q value to test
+    
+    Returns:
+        tuple: (best_p, best_q)
+    """
+    best_aic = np.inf
+    best_params = (1, 1)
+    
+    # Try different combinations of p and q
+    for p in range(1, max_p + 1):
+        for q in range(1, max_q + 1):
+            try:
+                model = arch_model(returns, vol='Garch', p=p, q=q)
+                fitted = model.fit(disp='off', show_warning=False)
+                
+                if fitted.aic < best_aic:
+                    best_aic = fitted.aic
+                    best_params = (p, q)
+                    print(f"  GARCH({p},{q}): AIC={fitted.aic:.2f} ✓")
+            except:
+                # Some combinations might not converge
+                continue
+    
+    return best_params
+
 @app.route('/')
 def dashboard():
     """Serve the dashboard HTML"""
@@ -109,9 +141,12 @@ def run_garch():
         
         current_price = float(data['Close'].iloc[-1])
         
-        # 3. Fit GARCH(1,1) model
-        print("Fitting GARCH model...")
-        model = arch_model(data['returns'], vol='Garch', p=1, q=1)
+        # 3. Fit GARCH model with automatic p,q selection
+        print("Optimizing GARCH(p,q) parameters...")
+        best_p, best_q = optimize_garch_params(data['returns'])
+        print(f"Optimal parameters: GARCH({best_p},{best_q})")
+        
+        model = arch_model(data['returns'], vol='Garch', p=best_p, q=best_q)
         model_fitted = model.fit(disp='off')
         
         # 4. Forecast volatility for next period
@@ -137,9 +172,11 @@ def run_garch():
             "predicted_volatility": predicted_volatility,
             "signal": signal,
             "model_params": json.dumps({
+                "p": best_p,
+                "q": best_q,
                 "omega": float(model_fitted.params['omega']),
-                "alpha": float(model_fitted.params['alpha[1]']),
-                "beta": float(model_fitted.params['beta[1]']),
+                "alpha": float(model_fitted.params[f'alpha[{best_q}]']) if f'alpha[{best_q}]' in model_fitted.params else float(model_fitted.params['alpha[1]']),
+                "beta": float(model_fitted.params[f'beta[{best_p}]']) if f'beta[{best_p}]' in model_fitted.params else float(model_fitted.params['beta[1]']),
                 "aic": float(model_fitted.aic),
                 "bic": float(model_fitted.bic)
             })
