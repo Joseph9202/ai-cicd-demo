@@ -27,7 +27,7 @@ import pandas as pd
 import numpy as np
 from arch import arch_model
 from google.cloud import bigquery
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 import functions_framework
 import requests
 import google.generativeai as genai
@@ -501,6 +501,120 @@ def send_ai_report():
         error_msg = f"Error generating/sending report: {str(e)}"
         print(error_msg)
         return jsonify({"status": "error", "message": error_msg}), 500
+
+@app.route('/telegram-webhook', methods=['POST'])
+def telegram_webhook():
+    """Handle incoming Telegram bot updates"""
+    try:
+        update = request.get_json()
+        
+        # Extract message info
+        if 'message' not in update:
+            return jsonify({"status": "ok"}), 200
+            
+        message = update['message']
+        chat_id = message['chat']['id']
+        text = message.get('text', '')
+        
+        # Only respond to authorized chat
+        authorized_chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+        if str(chat_id) != str(authorized_chat_id):
+            print(f"Unauthorized chat ID: {chat_id}")
+            return jsonify({"status": "unauthorized"}), 403
+        
+        # Handle commands
+        if text.startswith('/'):
+            handle_telegram_command(text, chat_id)
+        
+        return jsonify({"status": "ok"}), 200
+        
+    except Exception as e:
+        print(f"Error in telegram webhook: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+def handle_telegram_command(command, chat_id):
+    """Process Telegram bot commands"""
+    command = command.lower().strip()
+    
+    try:
+        if command == '/reporte' or command == '/report':
+            # Generate and send AI report
+            msg = "🔄 Generando reporte AI... (puede tomar unos segundos)"
+            send_telegram_message(chat_id, msg)
+            
+            report = generate_ai_report()
+            send_telegram_message(chat_id, report)
+            
+        elif command == '/ayuda' or command == '/help':
+            help_text = """
+📊 *GARCH Trading Bot - Comandos Disponibles*
+
+🤖 *Reportes AI:*
+/reporte - Genera análisis económico AI inmediato
+
+📈 *Estadísticas:*
+/stats - Muestra estadísticas rápidas
+
+ℹ️ *Ayuda:*
+/ayuda - Muestra este mensaje
+
+---
+_Bot alimentado por Gemini AI_
+"""
+            send_telegram_message(chat_id, help_text)
+            
+        elif command == '/stats':
+            # Quick stats from BigQuery
+            try:
+                client = bigquery.Client(project=PROJECT_ID)
+                query = f"""
+                SELECT 
+                    COUNT(*) as total,
+                    AVG(predicted_volatility) as avg_vol,
+                    MAX(current_price) as max_price,
+                    MIN(current_price) as min_price
+                FROM `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}`
+                WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+                """
+                
+                result = list(client.query(query).result())[0]
+                
+                stats_msg = f"""📊 *Estadísticas 24h*
+
+📈 Predicciones: {result.total}
+📉 Volatilidad promedio: {result.avg_vol:.4f}%
+💰 Precio máximo: ${result.max_price:,.2f}
+💵 Precio mínimo: ${result.min_price:,.2f}
+"""
+                send_telegram_message(chat_id, stats_msg)
+                
+            except Exception as e:
+                send_telegram_message(chat_id, f"❌ Error obteniendo stats: {str(e)}")
+        
+        else:
+            send_telegram_message(chat_id, f"Comando no reconocido: {command}\n\nUsa /ayuda para ver comandos disponibles.")
+            
+    except Exception as e:
+        print(f"Error handling command {command}: {str(e)}")
+        send_telegram_message(chat_id, f"❌ Error procesando comando: {str(e)}")
+
+def send_telegram_message(chat_id, text):
+    """Send message to specific Telegram chat"""
+    token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    if not token:
+        print("TELEGRAM_BOT_TOKEN not configured")
+        return
+        
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "Markdown"
+        }
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"Error sending Telegram message: {e}")
 
 
 @functions_framework.http
