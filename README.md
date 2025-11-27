@@ -18,6 +18,17 @@ Every 5 minutes (configurable), this Cloud Function:
 2. Fits a GARCH(1,1) econometric model to predict price volatility
 3. Generates hypothetical trading signals (educational only)
 4. Stores predictions in BigQuery for analysis
+5. **NEW**: Sends automated alerts via Telegram when profitable
+6. **NEW**: Generates AI-powered economic analysis reports using Gemini
+
+## 🤖 Interactive Telegram Bot
+
+The bot responds to commands in real-time:
+- `/reporte` - Generate AI-powered economic analysis report instantly
+- `/stats` - View quick statistics from the last 24 hours
+- `/ayuda` - Show available commands
+
+**See [BOT_GUIDE.md](BOT_GUIDE.md) for complete bot documentation.**
 
 ## Architecture
 ```
@@ -49,7 +60,34 @@ bq mk --table travel-recomender:trading_bot.garch_predictions \
   timestamp:TIMESTAMP,asset:STRING,current_price:FLOAT64,predicted_volatility:FLOAT64,signal:STRING,model_params:JSON
 ```
 
-### 2. Deploy Cloud Function
+### 2. Configure Telegram Bot & AI Reports
+
+```bash
+# Set up environment variables
+export GEMINI_API_KEY='your-gemini-api-key'
+export TELEGRAM_BOT_TOKEN='your-bot-token'
+export TELEGRAM_CHAT_ID='your-chat-id'
+
+# Test Telegram connection
+./setup_telegram.sh test
+
+# Deploy with all credentials
+./deploy_with_ai.sh
+
+# Configure webhook for bot commands
+./setup_webhook.sh
+```
+
+**📚 Detailed setup instructions:** [TELEGRAM_FIX.md](TELEGRAM_FIX.md)
+
+### 3. Deploy Cloud Function
+
+**Option A: With Telegram & AI (Recommended)**
+```bash
+./deploy_with_ai.sh
+```
+
+**Option B: Manual deployment**
 ```bash
 gcloud functions deploy garch-trading-bot \
   --runtime python311 \
@@ -61,7 +99,7 @@ gcloud functions deploy garch-trading-bot \
   --timeout 540s
 ```
 
-### 3. Setup Scheduler (Every 5 Minutes)
+### 4. Setup Scheduler (Every 5 Minutes)
 ```bash
 gcloud scheduler jobs create http garch-bot-scheduler \
   --schedule "*/5 * * * *" \

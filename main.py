@@ -27,10 +27,15 @@ import pandas as pd
 import numpy as np
 from arch import arch_model
 from google.cloud import bigquery
-from flask import Flask, render_template, jsonify, request
+from google.cloud import storage
+from flask import Flask, render_template, jsonify, request, send_file
 import functions_framework
 import requests
 import google.generativeai as genai
+from pdf_generator import create_pdf_report
+from vector_db import store_report, search_similar_reports, get_report_stats
+from whatsapp_client import send_whatsapp_message, send_whatsapp_pdf, get_whatsapp_qr
+from io import BytesIO
 
 # Create Flask app
 app = Flask(__name__)
@@ -39,6 +44,7 @@ app = Flask(__name__)
 PROJECT_ID = "travel-recomender"
 DATASET_ID = "trading_bot"
 TABLE_ID = "garch_predictions"
+BUCKET_NAME = "travel-recomender-garch-reports"
 
 def optimize_garch_params(returns, max_p=3, max_q=3):
     """
@@ -162,7 +168,7 @@ def generate_ai_report():
             return "⚠️ GEMINI_API_KEY not configured"
         
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-pro-latest')
         
         # Fetch last 24 hours of data
         client = bigquery.Client(project=PROJECT_ID)
@@ -182,7 +188,11 @@ def generate_ai_report():
         predictions = []
         
         for row in results:
-            params = json.loads(row.model_params) if row.model_params else {}
+            # model_params is already a dict from BigQuery (JSON type)
+            if row.model_params:
+                params = row.model_params if isinstance(row.model_params, dict) else json.loads(row.model_params)
+            else:
+                params = {}
             predictions.append({
                 'timestamp': row.timestamp.isoformat(),
                 'price': float(row.current_price),
@@ -249,12 +259,24 @@ Usa emojis apropiados y formato claro para Telegram."""
 _Análisis generado por Gemini AI • Datos: últimas 24h_
 """
         
-        return report
+        # Prepare metadata for PDF and vector DB
+        metadata = {
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'price': prices[0],
+            'volatility': avg_vol,
+            'signal': signals[0],  # Latest signal
+            'avg_volatility': avg_vol,
+            'persistence': persistence,
+            'num_predictions': len(predictions),
+            'price_change_24h': price_change
+        }
+        
+        return report, metadata
         
     except Exception as e:
         error_msg = f"❌ Error generando reporte AI: {str(e)}"
         print(error_msg)
-        return error_msg
+        return error_msg, None
 
 def calculate_portfolio_performance(predictions):
     """
@@ -481,20 +503,58 @@ def run_garch():
 
 @app.route('/report', methods=['POST', 'GET'])
 def send_ai_report():
-    """Generate and send AI-powered economic analysis report via Telegram"""
+    """Generate and send AI-powered economic analysis report via Telegram with PDF"""
     try:
         print("Generating AI report...")
         
         # Generate report using Gemini AI
-        report_text = generate_ai_report()
+        report_text, metadata = generate_ai_report()
         
-        # Send via Telegram
+        if not metadata:
+            # Error occurred, just send text
+            send_telegram_alert(report_text)
+            return jsonify({
+                "status": "error",
+                "message": "Failed to generate report",
+                "report_length": len(report_text)
+            }), 500
+        
+        # Save report with PDF and vector DB
+        result = save_report_with_pdf(report_text, metadata)
+        
+        # Send report text via Telegram
         send_telegram_alert(report_text)
+        
+        # Send PDF to Telegram if available
+        if result and result.get('pdf_bytes'):
+            try:
+                token = os.environ.get('TELEGRAM_BOT_TOKEN')
+                chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+                
+                if token and chat_id:
+                    url = f"https://api.telegram.org/bot{token}/sendDocument"
+                    files = {'document': (f"reporte_{metadata['timestamp']}.pdf".replace(' ', '_').replace(':', '-'), result['pdf_bytes'], 'application/pdf')}
+                    data = {'chat_id': chat_id, 'caption': '📄 Reporte completo en PDF'}
+                    requests.post(url, files=files, data=data, timeout=30)
+                    print("✅ PDF sent to Telegram")
+            except Exception as e:
+                print(f"⚠️ Error sending PDF to Telegram: {e}")
+
+        # Send to WhatsApp if configured
+        try:
+            print("Sending to WhatsApp...")
+            send_whatsapp_message(report_text)
+            if result and result.get('pdf_url'):
+                send_whatsapp_pdf(result['pdf_url'], "📄 Reporte GARCH PDF")
+        except Exception as e:
+            print(f"⚠️ Error sending to WhatsApp: {e}")
         
         return jsonify({
             "status": "success",
             "message": "AI report sent to Telegram",
-            "report_length": len(report_text)
+            "report_length": len(report_text),
+            "pdf_url": result.get('pdf_url') if result else None,
+            "doc_id": result.get('doc_id') if result else None
         })
         
     except Exception as e:
@@ -538,28 +598,144 @@ def handle_telegram_command(command, chat_id):
     
     try:
         if command == '/reporte' or command == '/report':
-            # Generate and send AI report
+            # Generate and send AI report with PDF
             msg = "🔄 Generando reporte AI... (puede tomar unos segundos)"
             send_telegram_message(chat_id, msg)
             
-            report = generate_ai_report()
-            send_telegram_message(chat_id, report)
+            report, metadata = generate_ai_report()
             
+            if metadata:
+                # Save PDF and send
+                result = save_report_with_pdf(report, metadata)
+                send_telegram_message(chat_id, report)
+                
+                # Send PDF
+                if result and result.get('pdf_bytes'):
+                    try:
+                        token = os.environ.get('TELEGRAM_BOT_TOKEN')
+                        url = f"https://api.telegram.org/bot{token}/sendDocument"
+                        files = {'document': (f"reporte.pdf", result['pdf_bytes'], 'application/pdf')}
+                        data = {'chat_id': chat_id, 'caption': '📄 Reporte en PDF'}
+                        requests.post(url, files=files, data=data, timeout=30)
+                    except Exception as e:
+                        print(f"Error sending PDF: {e}")
+            else:
+                send_telegram_message(chat_id, report)
+            
+        elif command == '/pdf':
+            # Send last report as PDF
+            msg = "📄 Generando PDF del último reporte..."
+            send_telegram_message(chat_id, msg)
+            
+            report, metadata = generate_ai_report()
+            if metadata:
+                result = save_report_with_pdf(report, metadata)
+                if result and result.get('pdf_bytes'):
+                    try:
+                        token = os.environ.get('TELEGRAM_BOT_TOKEN')
+                        url = f"https://api.telegram.org/bot{token}/sendDocument"
+                        files = {'document': (f"reporte.pdf", result['pdf_bytes'], 'application/pdf')}
+                        data = {'chat_id': chat_id, 'caption': f"📄 Reporte PDF\n🔗 {result.get('pdf_url','')}"}
+                        requests.post(url, files=files, data=data, timeout=30)
+                        send_telegram_message(chat_id, "✅ PDF enviado")
+                    except Exception as e:
+                        send_telegram_message(chat_id, f"❌ Error: {str(e)}")
+            else:
+                send_telegram_message(chat_id, "❌ Error generando PDF")
+        
+        elif command.startswith('/analisis'):
+            # Meta-analysis command
+            msg = "🔍 Buscando reportes históricos..."
+            send_telegram_message(chat_id, msg)
+            
+            # Extract query from command (e.g., "/analisis volatilidad")
+            query = command.replace('/analisis', '').strip()
+            if not query:
+                query = "tendencias y volatilidad del mercado"
+            
+            results = search_similar_reports(query, n_results=5)
+            
+            if results['documents'] and results['documents'][0]:
+                # Generate meta-analysis
+                reports_context = []
+                for doc, meta in zip(results['documents'][0], results['metadatas'][0]):
+                    reports_context.append({
+                        'timestamp': meta.get('timestamp', ''),
+                        'price': meta.get('price', 0),
+                        'volatility': meta.get('volatility', 0),
+                        'signal': meta.get('signal', '')
+                    })
+                
+                # Generate analysis with Gemini
+                api_key = os.environ.get('GEMINI_API_KEY')
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel('gemini-pro-latest')
+                
+                prompt = f"""Analiza estos {len(reports_context)} reportes históricos de Bitcoin:
+
+Query: "{query}"
+
+Reportes:
+"""
+                for i, rpt in enumerate(reports_context[:3], 1):
+                    prompt += f"{i}. {rpt['timestamp']}: ${rpt['price']:,.2f}, Vol: {rpt['volatility']:.4f}%, {rpt['signal']}\n"
+                
+                prompt += "\nGenera análisis conciso (max 150 palabras) con tendencias e insights."
+                
+                response = model.generate_content(prompt)
+                analysis = f"""📊 *Metaanálisis*
+🔍 Query: {query}
+📈 Reportes encontrados: {len(reports_context)}
+
+{response.text}"""
+                
+                send_telegram_message(chat_id, analysis)
+            else:
+                send_telegram_message(chat_id, "📊 No hay suficientes reportes históricos")
+        
+        elif command == '/link-whatsapp':
+            # Link WhatsApp via QR Code
+            msg = "🔄 Generando código QR para WhatsApp..."
+            send_telegram_message(chat_id, msg)
+            
+            qr_base64 = get_whatsapp_qr()
+            
+            if qr_base64:
+                try:
+                    # Send QR image to Telegram
+                    import base64
+                    qr_bytes = base64.b64decode(qr_base64.replace('data:image/png;base64,', ''))
+                    
+                    token = os.environ.get('TELEGRAM_BOT_TOKEN')
+                    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+                    files = {'photo': ('qrcode.png', qr_bytes, 'image/png')}
+                    data = {'chat_id': chat_id, 'caption': '📱 Escanea este código con tu WhatsApp\n(Dispositivos vinculados > Vincular dispositivo)'}
+                    requests.post(url, files=files, data=data, timeout=30)
+                except Exception as e:
+                    send_telegram_message(chat_id, f"❌ Error enviando QR: {str(e)}")
+            else:
+                send_telegram_message(chat_id, "❌ No se pudo generar el QR. Verifica que la VM de Evolution API esté corriendo.")
+
         elif command == '/ayuda' or command == '/help':
             help_text = """
 📊 *GARCH Trading Bot - Comandos Disponibles*
 
 🤖 *Reportes AI:*
-/reporte - Genera análisis económico AI inmediato
+/reporte - Genera análisis económico AI inmediato (incluye PDF)
+/pdf - Envía último reporte en PDF
 
-📈 *Estadísticas:*
-/stats - Muestra estadísticas rápidas
+📈 *Análisis:*
+/analisis [tema] - Metaanálisis de reportes históricos
+/stats - Estadísticas rápidas de 24h
+
+📱 *WhatsApp:*
+/link-whatsapp - Vincular cuenta de WhatsApp
 
 ℹ️ *Ayuda:*
 /ayuda - Muestra este mensaje
 
 ---
-_Bot alimentado por Gemini AI_
+_Bot con Gemini AI + Vector DB + WhatsApp_
 """
             send_telegram_message(chat_id, help_text)
             
@@ -615,6 +791,157 @@ def send_telegram_message(chat_id, text):
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"Error sending Telegram message: {e}")
+
+
+def upload_pdf_to_storage(pdf_bytes, filename):
+    """Upload PDF to Cloud Storage and return public URL"""
+    try:
+        storage_client = storage.Client(project=PROJECT_ID)
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blob = bucket.blob(f"reports/{filename}")
+        
+        blob.upload_from_string(pdf_bytes, content_type='application/pdf')
+        
+        # Make blob publicly accessible
+        blob.make_public()
+        
+        public_url = blob.public_url
+        print(f"✅ PDF uploaded: {public_url}")
+        return public_url
+    
+    except Exception as e:
+        print(f"❌ Error uploading PDF: {e}")
+        return None
+
+
+def save_report_with_pdf(report_text, metadata):
+    """
+    Generate PDF, upload to storage, and save in vector DB
+    
+    Args:
+        report_text (str): Full AI-generated report text
+        metadata (dict): Report metadata
+    
+    Returns:
+        dict: {'pdf_url': str, 'doc_id': str}
+    """
+    try:
+        # Prepare data for PDF
+        pdf_data = {
+            'title': 'GARCH Trading Bot - AI Report',
+            'timestamp': metadata.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+            'price': metadata.get('price', 0),
+            'volatility': metadata.get('volatility', 0),
+            'signal': metadata.get('signal', 'N/A'),
+            'ai_analysis': report_text,
+            'stats': {
+                'avg_volatility': metadata.get('avg_volatility', 0),
+                'persistence': metadata.get('persistence', 0),
+                'num_predictions': metadata.get('num_predictions', 0)
+            }
+        }
+        
+        # Generate PDF
+        pdf_bytes = create_pdf_report(pdf_data)
+        
+        # Upload to Cloud Storage
+        timestamp_str = metadata.get('timestamp', datetime.now().strftime('%Y%m%d_%H%M%S'))
+        filename = f"garch_report_{timestamp_str}.pdf".replace(' ', '_').replace(':', '-')
+        pdf_url = upload_pdf_to_storage(pdf_bytes, filename)
+        
+        # Store in vector database
+        doc_id = store_report(report_text, metadata, pdf_url)
+        
+        return {
+            'pdf_url': pdf_url,
+            'doc_id': doc_id,
+            'pdf_bytes': pdf_bytes  # For sending via Telegram
+        }
+    
+    except Exception as e:
+        print(f"❌ Error in save_report_with_pdf: {e}")
+        return None
+
+
+@app.route('/meta-analysis', methods=['POST'])
+def meta_analysis():
+    """Generate meta-analysis using semantic search of historical reports"""
+    try:
+        data = request.get_json() or {}
+        query = data.get('query', 'volatilidad y tendencias del mercado')
+        n_results = data.get('n_results', 10)
+        
+        print(f"🔍 Meta-analysis query: {query}")
+        
+        # Search similar reports
+        results = search_similar_reports(query, n_results=n_results)
+        
+        if not results['documents'] or not results['documents'][0]:
+            return jsonify({
+                'status': 'success',
+                'message': 'No hay suficientes reportes históricos para metaanálisis',
+                'reports_found': 0
+            })
+        
+        # Prepare context from search results
+        reports_context = []
+        for i, (doc, meta) in enumerate(zip(results['documents'][0], results['metadatas'][0])):
+            reports_context.append({
+                'timestamp': meta.get('timestamp', ''),
+                'price': meta.get('price', 0),
+                'volatility': meta.get('volatility', 0),
+                'signal': meta.get('signal', ''),
+                'excerpt': doc[:300]  # First 300 chars
+            })
+        
+        # Generate meta-analysis using Gemini
+        api_key = os.environ.get('GEMINI_API_KEY')
+        if not api_key:
+            return jsonify({'status': 'error', 'message': 'GEMINI_API_KEY not configured'}), 500
+        
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-pro-latest')
+        
+        # Create prompt for meta-analysis
+        prompt = f"""Eres un analista cuantitativo experto. Analiza los siguientes {len(reports_context)} reportes históricos de trading de Bitcoin basados en GARCH.
+
+Query del usuario: "{query}"
+
+Reportes encontrados (ordenados por relevancia):
+"""
+        
+        for i, rpt in enumerate(reports_context[:5], 1):  # Top 5
+            prompt += f"\n{i}. Fecha: {rpt['timestamp']}\n"
+            prompt += f"   Precio: ${rpt['price']:,.2f}\n"
+            prompt += f"   Volatilidad: {rpt['volatility']:.4f}%\n"
+            prompt += f"   Señal: {rpt['signal']}\n"
+            prompt += f"   Extracto: {rpt['excerpt']}...\n"
+        
+        prompt += """\n
+Genera un metaanálisis que incluya:
+1. **Tendencias Identificadas**: Patrones en volatilidad, precios y señales
+2. **Evolución Temporal**: Cómo han cambiado las métricas a lo largo del tiempo
+3. **Insights Clave**: Hallazgos importantes para trading
+4. **Recomendaciones**: Basadas en el análisis histórico
+
+Máximo 300 palabras. Usa formato markdown para Telegram."""
+        
+        response = model.generate_content(prompt)
+        meta_analysis_text = response.text
+        
+        return jsonify({
+            'status': 'success',
+            'query': query,
+            'reports_found': len(reports_context),
+            'meta_analysis': meta_analysis_text,
+            'top_reports': reports_context[:5]
+        })
+    
+    except Exception as e:
+        error_msg = f"Error en meta-analysis: {str(e)}"
+        print(error_msg)
+        return jsonify({'status': 'error', 'message': error_msg}), 500
+
 
 
 @functions_framework.http
