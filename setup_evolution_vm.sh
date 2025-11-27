@@ -35,6 +35,7 @@ API_KEY=$(openssl rand -hex 16)
 echo "AUTHENTICATION_API_KEY=$API_KEY" > .env
 
 # Create docker-compose.yml
+# Create docker-compose.yml
 cat > docker-compose.yml <<EOF
 version: "3.3"
 services:
@@ -46,16 +47,36 @@ services:
     environment:
       - SERVER_URL=http://localhost:8080
       - AUTHENTICATION_API_KEY=\${AUTHENTICATION_API_KEY}
-      - DATABASE_ENABLED=false
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://evolution:evolution@postgres:5432/evolution
+      - DATABASE_CONNECTION_CLIENT_NAME=evolution_exchange
       - LOG_LEVEL=ERROR
       - DEL_INSTANCE=false
+      - CONFIG_SESSION_PHONE_VERSION=4.0.0
+      - QRCODE_LIMIT=30
     volumes:
       - evolution_instances:/evolution/instances
       - evolution_store:/evolution/store
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=evolution
+      - POSTGRES_PASSWORD=evolution
+      - POSTGRES_DB=evolution
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
 volumes:
   evolution_instances:
   evolution_store:
+  postgres_data:
 EOF
 
 # Start Evolution API
