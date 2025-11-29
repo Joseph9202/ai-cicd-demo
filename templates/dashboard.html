@@ -47,6 +47,50 @@
             font-size: 13px;
         }
 
+        .asset-selector {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .asset-selector select {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 8px 15px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.3s;
+        }
+
+        .asset-selector select:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .asset-selector button {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .asset-selector button:hover {
+            transform: translateY(-1px);
+        }
+
+        .asset-selector button:active {
+            transform: translateY(0);
+        }
+
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
@@ -195,11 +239,28 @@
         <div class="header">
             <h1>📊 GARCH Trading Bot</h1>
             <p>Predicción de volatilidad automatizada con ML | <span class="badge">DEMO EDUCATIVO</span></p>
+            <div class="asset-selector">
+                <label style="color: white; font-weight: 600;">Activo:</label>
+                <select id="asset-select">
+                    <option value="BTC-USD">Bitcoin (BTC)</option>
+                    <option value="ETH-USD">Ethereum (ETH)</option>
+                    <option value="BNB-USD">Binance Coin (BNB)</option>
+                    <option value="SOL-USD">Solana (SOL)</option>
+                    <option value="ADA-USD">Cardano (ADA)</option>
+                    <option value="XRP-USD">Ripple (XRP)</option>
+                    <option value="DOT-USD">Polkadot (DOT)</option>
+                    <option value="MATIC-USD">Polygon (MATIC)</option>
+                </select>
+                <button onclick="runPrediction()">Ejecutar Predicción</button>
+                <button onclick="loadTopVolatile()" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                    🔥 Top 5 Volátiles
+                </button>
+            </div>
         </div>
 
         <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
             <div class="stat-card">
-                <div class="stat-label">Precio BTC</div>
+                <div id="price-label" class="stat-label">Precio BTC</div>
                 <div id="price-value" class="stat-value">Cargando...</div>
             </div>
             <div class="stat-card">
@@ -384,6 +445,61 @@
             `;
 
             document.getElementById('predictions-table').innerHTML = html;
+        }
+
+        // New functions for asset selection
+        async function runPrediction() {
+            const asset = document.getElementById('asset-select').value;
+            const assetName = document.getElementById('asset-select').selectedOptions[0].text.split('(')[0].trim();
+
+            // Update label
+            document.getElementById('price-label').textContent = `Precio ${assetName}`;
+
+            try {
+                document.getElementById('price-value').textContent = 'Ejecutando...';
+                document.getElementById('volatility-value').textContent = '...';
+                document.getElementById('signal-value').textContent = '...';
+
+                const response = await fetch(`./run?asset=${asset}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    // Refresh predictions after a few seconds
+                    setTimeout(() => fetchPredictions(), 3000);
+                    alert(`✅ Predicción ejecutada para ${assetName}\nPrecio: $${data.price.toLocaleString()}\nVolatilidad: ${data.volatility.toFixed(2)}%\nSeñal: ${data.signal}`);
+                } else {
+                    alert(`❌ Error: ${data.message}`);
+                }
+            } catch (error) {
+                console.error('Error running prediction:', error);
+                alert('❌ Error ejecutando predicción');
+            }
+        }
+
+        async function loadTopVolatile() {
+            try {
+                const response = await fetch('./api/top-cryptos');
+                const data = await response.json();
+
+                if (data.status === 'success' && data.cryptos.length > 0) {
+                    const select = document.getElementById('asset-select');
+
+                    // Clear and populate with top volatile
+                    select.innerHTML = data.cryptos.map(symbol => {
+                        const name = symbol.replace('-USD', '');
+                        return `<option value="${symbol}">${name} (Top Volátil)</option>`;
+                    }).join('');
+
+                    alert(`🔥 Top ${data.cryptos.length} criptos más volátiles cargadas:\n${data.cryptos.map(s => s.replace('-USD', '')).join(', ')}`);
+                } else {
+                    alert('❌ Error obteniendo top cryptos');
+                }
+            } catch (error) {
+                console.error('Error loading top cryptos:', error);
+                alert('❌ Error cargando top volátiles');
+            }
         }
 
         fetchPredictions();

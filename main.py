@@ -217,33 +217,49 @@ def generate_ai_report():
         
         buy_pct = (signals.count('BUY') / len(signals)) * 100
         
-        # Create prompt for Gemini
-        prompt = f"""Eres un analista económico experto en modelos GARCH y volatilidad financiera.
+        # Create advanced prompt for Gemini
+        prompt = f"""You are a senior quantitative analyst at a hedge fund, specializing in cryptocurrency volatility modeling and GARCH econometrics. Analyze the following BTC market data with depth and nuance.
 
-Analiza los siguientes datos de BTC de las últimas 24 horas:
+**Market Data (Last 24h):**
+- Current Price: ${prices[0]:,.2f} USD
+- Price Movement: {price_change:+.2f}%
+- Sample Size: {len(predictions)} observations
+- Price Range: ${min(prices):,.2f} - ${max(prices):,.2f}
 
-**Datos del Mercado:**
-- Precio actual: ${prices[0]:,.2f}
-- Cambio 24h: {price_change:+.2f}%
-- Número de observaciones: {len(predictions)}
+**GARCH Model Diagnostics:**
+- Mean Predicted Volatility: {avg_vol:.4f}%
+- Volatility Std Dev: {vol_std:.4f}%
+- Persistence Coefficient (α+β): {persistence:.4f}
+- Volatility Range: {min(vols):.4f}% - {max(vols):.4f}%
+- Coefficient of Variation: {(vol_std/avg_vol)*100 if avg_vol > 0 else 0:.2f}%
 
-**Análisis de Volatilidad GARCH:**
-- Volatilidad promedio predicha: {avg_vol:.4f}%
-- Desviación estándar: {vol_std:.4f}%
-- Persistencia (α+β): {persistence:.4f}
-- Rango: {min(vols):.4f}% - {max(vols):.4f}%
+**Trading Signal Distribution:**
+- BUY signals: {buy_pct:.1f}%
+- SELL signals: {signals.count('SELL')/len(signals)*100:.1f}%
+- HOLD signals: {signals.count('HOLD')/len(signals)*100:.1f}%
 
-**Señales de Trading:**
-- BUY: {buy_pct:.1f}%
-- SELL: {100-buy_pct:.1f}%
+**Your Analysis Must Include:**
 
-Genera un reporte conciso (máximo 200 palabras) que incluya:
-1. **Resumen ejecutivo** del comportamiento del activo
-2. **Interpretación económica** de la persistencia de volatilidad
-3. **Evaluación de riesgos** basada en las métricas GARCH
-4. **Outlook** para las próximas horas
+1. **Market Regime Identification**: Is this a high/low volatility regime? Is volatility clustering present?
 
-Usa emojis apropiados y formato claro para Telegram."""
+2. **Persistence Interpretation**: With α+β = {persistence:.4f}, what does this tell us about volatility shocks? Will volatility mean-revert quickly or slowly?
+
+3. **Risk Assessment**: Given the current volatility distribution, quantify the risk exposure. Are we seeing heteroskedasticity? What's the tail risk?
+
+4. **Actionable Intelligence**: Based on GARCH diagnostics, what specific trading strategy adjustments should be made? Be concrete and avoid generic advice.
+
+5. **Market Context**: Connect these technical metrics to potential macro drivers or market microstructure effects.
+
+**Style Requirements:**
+- Be analytical, not descriptive
+- Use precise econometric language
+- Avoid repetitive phrases like "this suggests" or "we can see"
+- Include specific numerical insights
+- Maximum 250 words
+- Use emojis sparingly and strategically
+- Write in Spanish for Latin American audience
+
+Generate a professional analysis that a PM would actually read and act on."""
 
         # Generate AI response
         response = model.generate_content(prompt)
@@ -277,6 +293,58 @@ _Análisis generado por Gemini AI • Datos: últimas 24h_
         error_msg = f"❌ Error generando reporte AI: {str(e)}"
         print(error_msg)
         return error_msg, None
+
+def get_top_volatile_cryptos(n=5):
+    """
+    Get top N most volatile cryptocurrencies in the last 7 days
+
+    Returns:
+        list: List of crypto symbols (e.g., ['BTC-USD', 'ETH-USD', ...])
+    """
+    # Popular cryptos to analyze
+    cryptos = [
+        'BTC-USD',   # Bitcoin
+        'ETH-USD',   # Ethereum
+        'BNB-USD',   # Binance Coin
+        'SOL-USD',   # Solana
+        'ADA-USD',   # Cardano
+        'XRP-USD',   # Ripple
+        'DOT-USD',   # Polkadot
+        'MATIC-USD', # Polygon
+        'LINK-USD',  # Chainlink
+        'AVAX-USD',  # Avalanche
+        'UNI-USD',   # Uniswap
+        'ATOM-USD',  # Cosmos
+    ]
+
+    volatilities = []
+
+    for symbol in cryptos:
+        try:
+            # Get last 7 days of data
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(period="7d", interval="1h")
+
+            if len(data) < 24:
+                continue
+
+            # Calculate returns and volatility
+            returns = data['Close'].pct_change().dropna()
+            volatility = returns.std() * 100  # As percentage
+
+            volatilities.append({
+                'symbol': symbol,
+                'volatility': volatility,
+                'price': data['Close'].iloc[-1]
+            })
+        except:
+            continue
+
+    # Sort by volatility (descending)
+    volatilities.sort(key=lambda x: x['volatility'], reverse=True)
+
+    # Return top N symbols
+    return [v['symbol'] for v in volatilities[:n]]
 
 def calculate_portfolio_performance(predictions):
     """
@@ -356,6 +424,22 @@ def dashboard():
     """Serve the dashboard HTML"""
     return render_template('dashboard.html')
 
+@app.route('/api/top-cryptos')
+def get_top_cryptos_endpoint():
+    """API endpoint to get top 5 most volatile cryptocurrencies"""
+    try:
+        top_cryptos = get_top_volatile_cryptos(n=5)
+        return jsonify({
+            'status': 'success',
+            'cryptos': top_cryptos,
+            'count': len(top_cryptos)
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
 @app.route('/api/predictions')
 def get_predictions():
     """API endpoint to fetch predictions from BigQuery"""
@@ -411,9 +495,17 @@ def get_predictions():
 
 @app.route('/run', methods=['POST', 'GET'])
 def run_garch():
-    """Run GARCH prediction - called by Cloud Scheduler"""
-    
-    ASSET = "BTC-USD"
+    """Run GARCH prediction - called by Cloud Scheduler or API request
+
+    Query params or JSON body:
+        asset: Cryptocurrency symbol (e.g., 'BTC-USD'). Default: BTC-USD
+    """
+
+    # Get asset from query params or JSON body
+    if request.method == 'POST' and request.is_json:
+        ASSET = request.json.get('asset', 'BTC-USD')
+    else:
+        ASSET = request.args.get('asset', 'BTC-USD')
     
     try:
         # 1. Fetch recent price data (last 30 days for sufficient history)
@@ -444,17 +536,30 @@ def run_garch():
         # 4. Forecast volatility for next period
         forecast = model_fitted.forecast(horizon=1)
         predicted_volatility = float(np.sqrt(forecast.variance.values[-1, 0]))
-        
-        # 5. Generate trading signal based on volatility
-        volatility_threshold_high = 3.0
-        volatility_threshold_low = 1.5
-        
-        if predicted_volatility > volatility_threshold_high:
-            signal = "SELL"
-        elif predicted_volatility < volatility_threshold_low:
-            signal = "BUY"
+
+        # 5. Generate trading signal based on DYNAMIC volatility thresholds
+        # Calculate historical volatility distribution from recent data
+        historical_volatilities = data['returns'].rolling(window=24).std().dropna()
+
+        # Use percentiles for dynamic thresholds
+        vol_75_percentile = np.percentile(historical_volatilities, 75)
+        vol_25_percentile = np.percentile(historical_volatilities, 25)
+
+        # Add buffer to avoid too many trades (10% buffer)
+        buffer = (vol_75_percentile - vol_25_percentile) * 0.1
+        threshold_high = vol_75_percentile + buffer
+        threshold_low = vol_25_percentile - buffer
+
+        print(f"Dynamic thresholds: LOW={threshold_low:.4f}%, HIGH={threshold_high:.4f}%")
+        print(f"Predicted volatility: {predicted_volatility:.4f}%")
+
+        # Generate signal based on dynamic thresholds
+        if predicted_volatility > threshold_high:
+            signal = "SELL"  # High volatility = risky, sell
+        elif predicted_volatility < threshold_low:
+            signal = "BUY"   # Low volatility = stable, buy
         else:
-            signal = "HOLD"
+            signal = "HOLD"  # Medium volatility = wait
         
         # 6. Prepare data for BigQuery
         row = {
@@ -470,7 +575,11 @@ def run_garch():
                 "alpha": float(model_fitted.params[f'alpha[{best_q}]']) if f'alpha[{best_q}]' in model_fitted.params else float(model_fitted.params['alpha[1]']),
                 "beta": float(model_fitted.params[f'beta[{best_p}]']) if f'beta[{best_p}]' in model_fitted.params else float(model_fitted.params['beta[1]']),
                 "aic": float(model_fitted.aic),
-                "bic": float(model_fitted.bic)
+                "bic": float(model_fitted.bic),
+                "threshold_high": float(threshold_high),
+                "threshold_low": float(threshold_low),
+                "vol_75_percentile": float(vol_75_percentile),
+                "vol_25_percentile": float(vol_25_percentile)
             })
         }
         
@@ -503,60 +612,97 @@ def run_garch():
 
 @app.route('/report', methods=['POST', 'GET'])
 def send_ai_report():
-    """Generate and send AI-powered economic analysis report via Telegram with PDF"""
+    """Generate and send AI-powered economic analysis report via Telegram with PDF
+
+    IMPORTANT: Only sends to Telegram when signal changes to BUY
+    Always saves to vector database regardless of signal
+    """
     try:
         print("Generating AI report...")
-        
+
         # Generate report using Gemini AI
         report_text, metadata = generate_ai_report()
-        
+
         if not metadata:
-            # Error occurred, just send text
-            send_telegram_alert(report_text)
+            # Error occurred, cannot proceed
             return jsonify({
                 "status": "error",
                 "message": "Failed to generate report",
-                "report_length": len(report_text)
+                "report_length": len(report_text) if report_text else 0
             }), 500
-        
-        # Save report with PDF and vector DB
-        result = save_report_with_pdf(report_text, metadata)
-        
-        # Send report text via Telegram
-        send_telegram_alert(report_text)
-        
-        # Send PDF to Telegram if available
-        if result and result.get('pdf_bytes'):
-            try:
-                token = os.environ.get('TELEGRAM_BOT_TOKEN')
-                chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-                
-                if token and chat_id:
-                    url = f"https://api.telegram.org/bot{token}/sendDocument"
-                    files = {'document': (f"reporte_{metadata['timestamp']}.pdf".replace(' ', '_').replace(':', '-'), result['pdf_bytes'], 'application/pdf')}
-                    data = {'chat_id': chat_id, 'caption': '📄 Reporte completo en PDF'}
-                    requests.post(url, files=files, data=data, timeout=30)
-                    print("✅ PDF sent to Telegram")
-            except Exception as e:
-                print(f"⚠️ Error sending PDF to Telegram: {e}")
 
-        # Send to WhatsApp if configured
+        # ALWAYS save report to vector DB and PDF (regardless of signal)
+        result = save_report_with_pdf(report_text, metadata)
+        print(f"✅ Report saved to vector DB and PDF")
+
+        # Get current and previous signal from BigQuery
+        current_signal = metadata.get('signal', '')
+
         try:
-            print("Sending to WhatsApp...")
-            send_whatsapp_message(report_text)
-            if result and result.get('pdf_url'):
-                send_whatsapp_pdf(result['pdf_url'], "📄 Reporte GARCH PDF")
+            client = bigquery.Client(project=PROJECT_ID)
+            # Get the last 2 predictions to compare signals
+            query = f"""
+            SELECT signal
+            FROM `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}`
+            ORDER BY timestamp DESC
+            LIMIT 2
+            """
+            results = list(client.query(query).result())
+
+            previous_signal = results[1].signal if len(results) > 1 else None
+
+            print(f"📊 Signal comparison: Previous={previous_signal}, Current={current_signal}")
+
         except Exception as e:
-            print(f"⚠️ Error sending to WhatsApp: {e}")
-        
+            print(f"⚠️ Could not get previous signal: {e}")
+            previous_signal = None
+
+        # ONLY send to Telegram if signal changed to BUY
+        should_notify = (current_signal == 'BUY' and previous_signal != 'BUY')
+
+        if should_notify:
+            print(f"🚨 SIGNAL CHANGED TO BUY! Sending notification to Telegram...")
+
+            # Send report text via Telegram
+            send_telegram_alert(report_text)
+
+            # Send PDF to Telegram if available
+            if result and result.get('pdf_bytes'):
+                try:
+                    token = os.environ.get('TELEGRAM_BOT_TOKEN')
+                    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+
+                    if token and chat_id:
+                        url = f"https://api.telegram.org/bot{token}/sendDocument"
+                        files = {'document': (f"reporte_BUY_{metadata['timestamp']}.pdf".replace(' ', '_').replace(':', '-'), result['pdf_bytes'], 'application/pdf')}
+                        data = {'chat_id': chat_id, 'caption': '🟢 SEÑAL DE COMPRA DETECTADA - Reporte completo'}
+                        requests.post(url, files=files, data=data, timeout=30)
+                        print("✅ PDF sent to Telegram")
+                except Exception as e:
+                    print(f"⚠️ Error sending PDF to Telegram: {e}")
+
+            # Send to WhatsApp if configured
+            try:
+                print("Sending to WhatsApp...")
+                send_whatsapp_message(f"🟢 SEÑAL DE COMPRA DETECTADA\n\n{report_text}")
+                if result and result.get('pdf_url'):
+                    send_whatsapp_pdf(result['pdf_url'], "📄 Reporte GARCH - SEÑAL BUY")
+            except Exception as e:
+                print(f"⚠️ Error sending to WhatsApp: {e}")
+        else:
+            print(f"ℹ️  Signal is {current_signal} (no change to BUY). Report saved but not sent to Telegram.")
+
         return jsonify({
             "status": "success",
-            "message": "AI report sent to Telegram",
+            "message": f"Report saved to DB. {'Notification sent (BUY signal)' if should_notify else 'No notification (not a BUY signal)'}",
             "report_length": len(report_text),
             "pdf_url": result.get('pdf_url') if result else None,
-            "doc_id": result.get('doc_id') if result else None
+            "doc_id": result.get('doc_id') if result else None,
+            "signal": current_signal,
+            "previous_signal": previous_signal,
+            "notified": should_notify
         })
-        
+
     except Exception as e:
         error_msg = f"Error generating/sending report: {str(e)}"
         print(error_msg)
